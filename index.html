@@ -414,6 +414,24 @@ button.small {
   text-align: center;
 }
 
+/* Filtres de la liste */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.filters input {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-size: .82rem;
+}
+.filters input[type="search"] { flex: 1; min-width: 200px; }
+.filters input:focus {
+  border-color: var(--accent);
+  outline: none;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(13,95,47,.08);
+}
+
 /* Responsive */
 @media (max-width: 650px) {
   main { width: min(100% - 28px, 560px); padding: 22px 0 45px; }
@@ -526,6 +544,13 @@ button.small {
           <p>Consultez, renommez ou supprimez les images publiées.</p>
         </div>
         <span class="section-index">02</span>
+      </div>
+
+      <!-- FILTRES -->
+      <div class="filters">
+        <input id="search" type="search" placeholder="Rechercher par nom…" aria-label="Rechercher une photo">
+        <input id="monthFilter" type="month" aria-label="Filtrer par mois">
+        <button id="resetFilters" class="ghost small" type="button" hidden>Réinitialiser</button>
       </div>
 
       <div id="list"></div>
@@ -737,10 +762,24 @@ async function loadList(reset) {
 
   say(listMsg, "Chargement des photos…");
 
-  const { data, error, count } = await db.from(TABLE)
+  let query = db.from(TABLE)
     .select("id, nom, url, date_ajout", { count: "exact" })
     .order("date_ajout", { ascending: false })
     .range(offset, offset + PAGE - 1);
+
+  // Filtres : recherche par nom + mois
+  const text = $("search").value.trim();
+  if (text) query = query.ilike("nom", `%${text}%`);
+
+  const month = $("monthFilter").value; // format "2026-10"
+  if (month) {
+    const [y, m] = month.split("-").map(Number);
+    query = query
+      .gte("date_ajout", new Date(y, m - 1, 1).toISOString())
+      .lt("date_ajout", new Date(y, m, 1).toISOString());
+  }
+
+  const { data, error, count } = await query;
 
   if (request !== listRequest) return;
 
@@ -757,7 +796,9 @@ async function loadList(reset) {
   if (count === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = "Aucune photo pour le moment. Ajoutez votre première image ci-dessus.";
+    empty.textContent = (text || month)
+      ? "Aucune photo ne correspond à ce filtre."
+      : "Aucune photo pour le moment. Ajoutez votre première image ci-dessus.";
     list.appendChild(empty);
   }
 
@@ -765,6 +806,21 @@ async function loadList(reset) {
 }
 
 $("more").addEventListener("click", () => loadList(false));
+
+/* FILTRES */
+let filterTimer;
+function onFilterChange() {
+  $("resetFilters").hidden = !($("search").value || $("monthFilter").value);
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => loadList(true), 300);
+}
+$("search").addEventListener("input", onFilterChange);
+$("monthFilter").addEventListener("input", onFilterChange);
+$("resetFilters").addEventListener("click", () => {
+  $("search").value = "";
+  $("monthFilter").value = "";
+  onFilterChange();
+});
 
 function btn(label, cls, onClick) {
   const b = document.createElement("button");
